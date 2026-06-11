@@ -309,6 +309,7 @@ def try_write_docx(out_md: Path, docx_out: Path) -> bool:
         str(docx_out),
         "--base-dir",
         str(base_dir),
+        "--no-math-render",  # 公式 PNG 已由上游 math_render 生成，避免二次渲染覆盖
     ]
     try:
         r = subprocess.run(

@@ -24,9 +24,9 @@ from pathlib import Path
 
 _DEFAULT_ASSETS = "math_figures"
 _INLINE_RE = re.compile(
-    r"(?<!\$)\$(?!\$)((?:\\.|[^$\n])+?)\$(?!\$)(?!\s*<!--)"
+    r"(?<!\$)\$(?!\$)((?:\\.|[^$\n])+?)\$(?!\$)(?!\s*<!--\s*!\[)"
 )
-_INLINE_PAREN_RE = re.compile(r"\\\(((?:\\.|[^)])+?)\\\)(?!\s*<!--)")
+_INLINE_PAREN_RE = re.compile(r"\\\(((?:\\.|[^)])+?)\\\)(?!\s*<!--\s*!\[)")
 _HIDDEN_IMG_COMMENT_RE = re.compile(
     r"<!--\s*!\[[^\]]*\]\([^)]+\)\s*-->"
 )
