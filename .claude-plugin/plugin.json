@@ -1,0 +1,10 @@
+{
+  "name": "gpt-image-2",
+  "version": "0.1.0",
+  "description": "GPT Image 2 skill from jiangmuran/claude-image — generate, edit images via OpenAI API",
+  "author": { "name": "jiangmuran", "url": "https://github.com/jiangmuran/claude-image" },
+  "contributors": [{ "name": "MuseLinn", "url": "https://github.com/MuseLinn" }],
+  "repository": "https://github.com/MuseLinn/gpt-image-2",
+  "license": "MIT",
+  "skills": ["./"]
+}

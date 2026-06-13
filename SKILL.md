@@ -1,106 +1,203 @@
 ---
-name: patent-disclosure-skill
-description: "通用中国专利挖掘发现与交底书生成全流程：扫描项目文档挖掘专利点、讨论融合、基于脱敏模版生成技术交底书、联网查新、生成后自检含逻辑闭环与公式参数一致性。| Patent mining, disclosure drafting, prior-art search, and consistency self-check."
-version: "1.8.9"
-user-invocable: true
-argument-hint: "[可选：项目路径或技术主题关键词]"
-allowed-tools: Read, Write, Edit, Grep, Glob, WebSearch, Bash
+name: gpt-image-2
+description: Use when generating, editing, composing, or iterating on images — illustrations for reports/web, posters with Chinese or English typography, pitch-deck slides, UI mockups, infographics, pixel art, game sprites, character reference sheets, app icons, logo concepts, photoreal product shots, or photo edits with precise local changes. Symptoms include the user asking for "图", "图片", "插图", "海报", "封面", "图标", "ppt素材", "游戏素材", "改图", "修图", "logo", "draw me", "make an image", "生成一张", or attaching an image they want modified. Calls the gpt-image-2 model (April 2026 release; near-perfect text rendering including Chinese, custom resolutions up to 3840px, precise edits with preserve/change pattern) via OpenAI-compatible /images/generations and /images/edits endpoints.
 ---
 
-# 专利挖掘与交底书生成
+# gpt-image-2
 
-本技能覆盖 **专利点挖掘** → **查新与差异化** → **交底书生成** → **自检完善** 全流程；分步指令在 **`prompts/`**，每步执行前 **`Read`** 对应文件，与步骤的对照见「Prompt 文件映射」。
+GPT Image 2 — released April 2026 — is the first generation that handles long instructional prompts cleanly, renders text correctly (Chinese / Japanese / Korean too), supports custom resolutions (max side < 3840px, ratio ≤ 3:1), and does precise local edits via the `change ONLY X / keep Y exactly` pattern.
 
-## 环境与约定
+This skill teaches you the prompt grammar, the workflow, and gives you a zero-dep CLI that handles auth, parallel batching, retries, and file IO.
 
-- **语言**：默认与用户语种一致；专利与法律术语采用行业常用表述。
-- **图示定稿（Step 7）**：**3.2**/**3.4** 用 fenced **mermaid**；执行方式、**`mmdc`** 安装与降级规则见下表「交底书定稿交付」行及 **`tools/README.md`**。
+## The contract
 
----
+Always go through `scripts/gpt_image.py`. Don't curl the API directly — the script handles auth, retries, b64-vs-URL responses, multipart for edits, parallel single-image calls when batching, and writes files to disk for you. The user can't see images that only exist in the API response.
 
-## 触发条件
+## Setup (once per machine)
 
-在用户使用以下任一方式时启用本技能：
+Two environment variables:
 
-- 明确提及：专利挖掘、专利点、技术交底书、交底书、专利交底书、查新、现有技术对比等
-- 斜杠或简短指令：如 `/patent-disclosure-skill`、`/patent-disclosure`、`/交底书`
-- **迭代模式（按意图识别）**：当用户意图明显是在**已有交底书或上一轮输出**上继续工作（如改章节、补实施例、补材料、修正参数/事实、调整表述等），**无需**用户写出「迭代」等固定词，也**不必**询问是否进入迭代——Agent 应 **`Read`** **`prompts/iteration_context.md`**，再 **`Read`** `prompts/merger.md`（侧重**新材料、扩展合并**）或 `prompts/correction_handler.md`（侧重**纠错、与事实或风格不符**），**严格按该文件开头的「执行门禁」**（优先执行，不可跳过）**做完合并或纠正**，**另存为新文件**：**`{案件名}_{YYYYMMDDHHmmss}.md`** 与同名 **`.docx`**（与首次定稿同一命名规则，见 **`disclosure_builder.md` §7.3 第 5 点**），**不覆盖**旧稿（除非用户明确要求）。**禁止**在迭代意图已成立时默认回到 Step 3–4 专利点全文分析（除非用户明确要求重新挖掘专利点）。对话中**已出现**交底书路径、附件或上文刚交付的草稿时，优先按迭代处理。
-
----
-
-## 工具与数据来源
-
-按任务选用能力；具体工具名称以当前 Agent 环境为准。
-
-若扫描范围内含 **Word（.docx）** 或 **PowerPoint（.pptx）**，须在 Step 2 纳入阅读前用本仓库 **`docx_to_md.py`** / **`pptx_to_md.py`** 转为 Markdown；依赖 **`pip install -r requirements.txt`**，命令与说明见下表对应行。
-
-### 常见任务与建议方式
-
-| 任务 | 建议方式 |
-|------|----------|
-| 加载分步指令 | **`Read`** → `${CLAUDE_SKILL_DIR}/prompts/*.md`，见下表 |
-| 读代码、设计文档、PDF、图片 | 文件读取工具；大仓库先用搜索/语义检索定位再精读 |
-| Word（.docx）→ Markdown + 抽取图片（扫描前） | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/docx_to_md.py --input {path}.docx --output {dir}/{name}.md`；图片默认写入与 `.md` 同级的 `{name}_media/`；需 `pip install -r requirements.txt`（含 mammoth）；复杂版式可改由所内导出 PDF/MD 再扫 |
-| PowerPoint（.pptx）→ Markdown + 抽取图片（扫描前） | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/pptx_to_md.py --input {path}.pptx --output {dir}/{name}.md`；默认 `{name}_media/`；需 `pip install -r requirements.txt`（含 python-pptx）；**旧版 .ppt 不支持**，请先另存为 `.pptx`；图表/SmartArt 等若未以图片形状嵌入则可能仅能从备注或另行导出补全 |
-| 罗列目录、按名找文件 | 目录列举 / 按文件名搜索 |
-| 联网查新（Step 5） | 执行前 **`Read`** `prompts/prior_art_search.md`。**中国专利公布公告**：优先 **`Bash`** 运行 `cnipa_epub_search.py`；**须在生成命令前**归纳 **2～8 个相关度高的语义块**；**执行时须分多次调用**，**每次仅传一个**词块，**自行按 `pub_number` 合并**多轮 `EPUB_HITS_JSON`（勿单次工具调用堆多个 argv，见该 prompt）。一步拉取+解析、**不写 HTML 落盘**；须 **`pip install -r tools/requirements-cnipa.txt`** 且 **`python -m playwright install chromium`**。**`abstract` 规定必用**同该 prompt。需整句一次 AND 或保存 HTML 时用 `cnipa_epub_crawler.py`；异常或无果再 **WebSearch** |
-| 交底书定稿交付（**须同时** .md + .docx） | **3.2** 系统框图与 **3.4** 流程图均用 fenced ``mermaid``，**不要** ASCII 文字流程图/框图。定稿执行 **`tools/mermaid_render.py`**：mermaid 转 PNG（失败块保留围栏）后默认生成同名 **.docx**；若 Word 失败，按 stderr 提示手动运行 **`md_to_docx.py`**。详见 **`tools/README.md`** |
-| 保存交底书路径 | 写入用户指定路径；未指定时可建议 `./outputs/{案件标识}/`；**凡交付的** `.md` / `.docx` 须为 **`{案件名}_{YYYYMMDDHHmmss}`**（§7.3 第 5 点，**含首次定稿与迭代**），勿默认覆盖旧稿；`outputs/` 整目录默认由 `.gitignore` 忽略 |
-| 迭代对话留档 | 每轮 **merger / correction** 交付后，在案件目录追加 **`交底书修订对话记录.md`**（**`tools/iteration_dialog_log.py`** 或等价手工），见 **`prompts/iteration_context.md`** |
-
----
-
-## Prompt 文件映射
-
-| 步骤 | 文件 | 用途 |
-|------|------|------|
-| Step 1 | `prompts/intake.md` | 边界与输入问题 |
-| Step 2 | `prompts/project_scan.md` | 项目文档扫描；**须**对 `.docx`/`.pptx` 先转换再读（见该文件「Office 文档」节）；独立图片目录可跳过 |
-| Step 3–4 | `prompts/patent_points_analyzer.md` | 候选专利点、融合与选定 |
-| Step 5 | `prompts/prior_art_search.md` | 联网查新与分析要求 |
-| Step 6 | `prompts/disclosure_preview.md` | 全文前的摘要预览 |
-| Step 7 | `prompts/disclosure_builder.md` + `prompts/template_reference.md` | 交底书结构、脱敏、**符号与公式体例（§7.7）**与图示规范；**mermaid 与 3.4.1 符号/公式范例在 template_reference** |
-| Step 8 | `prompts/disclosure_self_check.md` | 内部自检，不写入正文 |
-| 迭代 | `prompts/iteration_context.md` | 迭代意图、落盘命名、**修订对话记录 md**（含对话/记录时间） |
-| 迭代 | `prompts/merger.md` | 新材料增量合并；**文首含门禁**；输出 `{案件名}_{时间戳}.md`/`.docx` |
-| 迭代 | `prompts/correction_handler.md` | 对话纠正；**文首含门禁**；输出 `{案件名}_{时间戳}.md`/`.docx` |
-
----
-
-## 主流程（执行顺序）
-
-1. **`Read`** `intake.md` → 执行 Step 1  
-2. **`Read`** `project_scan.md` → 执行 Step 2  
-3. **`Read`** `patent_points_analyzer.md` → 执行 Step 3–4  
-4. **`Read`** `prior_art_search.md` → 执行 Step 5  
-5. **`Read`** `disclosure_preview.md` → 执行 Step 6；用户可跳过  
-6. **`Read`** `disclosure_builder.md` 与 **`Read`** `template_reference.md` → 执行 Step 7（**首次交付**的 `.md`/`.docx` 亦须 **`{案件名}_{YYYYMMDDHHmmss}`**，§7.3 第 5 点）；交付对话中**须**按 **`disclosure_builder.md` §7.6** 补充「权利要求偏向点」建议交互（**仅对话**，不入正文）  
-7. **`Read`** `disclosure_self_check.md` → 内部执行 Step 8，修订后交付  
-
-**禁止**：交底书正文中包含「自检清单」章节；自检仅内部使用。
-
----
-
-## 迭代模式（摘要）
-
-**启用方式**：根据用户**自然语言意图**判断（见上文「触发条件」），**不要求**固定关键词，**默认不**为「是否迭代」打断用户。
-
-- **补充材料 / 扩展章节**或 **§7.6 第五章权利要求书式强化（用户已声明侧重点）**：`Read` → `iteration_context.md` → `merger.md`；合并结果**另存为**带时间戳的 `.md`/`.docx`（§7.3 第 5 点）；**追加** `交底书修订对话记录.md`（`iteration_dialog_log.py` 或手工）；完成后**必须**输出「合并摘要」留档；若本轮亦为定稿交付，**仍建议**简短附带 §7.6 类引导  
-- **指出错误 / 与事实或参数不符**：`Read` → `iteration_context.md` → `correction_handler.md`；纠正结果**另存为**带时间戳的 `.md`/`.docx`；**追加**对话记录；完成后**必须**输出「纠正摘要」留档；定稿交付时**还须**按 **`disclosure_builder.md` §7.6** 附「权利要求偏向点」引导（见 **`correction_handler.md`** 末尾）  
-
-主流程 Step 7→8 的 **`disclosure_self_check.md`** 仍在新稿定稿路径上内部执行。
-
----
-
-## Agent 自用工作流检查清单
-
+```bash
+export OPENAI_IMAGE_API_KEY="sk-..."                  # required
+export OPENAI_IMAGE_BASE_URL="https://jmrai.net/v1"   # default; override only if user has a different host
 ```
-□ 已按步骤 Read 对应 prompts；Step 2 若目录含 Office，已执行 docx_to_md / pptx_to_md 并读了产出 `.md`
-□ 识别到「在已有交底书上修改」类意图时，已 Read `iteration_context.md` 并选用 merger 或 correction_handler（而非从头跑扫描）；交付为**新** `{案件名}_{时间戳}.md`/`.docx`，未无故覆盖旧稿
-□ 执行 merger / correction_handler 后，已在对话中输出该文件要求的留档摘要（合并摘要 / 纠正摘要）；案件目录已追加 **`交底书修订对话记录.md`**（或等价日志）
-□ 查新完成且写入 1.1 与区别论述（符合 `prior_art_search.md`：**优先** `tools/cnipa_epub_search.py`，**国知局侧已分多次调用、每轮一词，并已自行合并** `EPUB_HITS_JSON`；**`abstract` 必用且已充分理解后再概括**；异常或无果再 **WebSearch**）
-□ 除用户明确跳过外，完成摘要预览
-□ 脱敏、mermaid（定稿均已渲染为 PNG）、章节引用符合 template_reference；含公式时 **3.4.1 符号表、§7.7 体例**（维度下标、无字母多义、LaTeX 分隔符统一）及 **3.5 符号列同形** 已满足；**已交付 .md 与 .docx**，且**文件名符合 §7.3 第 5 点**（**凡交付均含**时间戳后缀）；**正文无**技能/示例仓库类文末脚注
-□ 定稿类对话已含 **`disclosure_builder.md` §7.6**「权利要求偏向点」建议交互（**不入正文**、**不捏造**未在稿内出现的保护取向）；迭代再走 merger 时见 **`iteration_context.md`** 表格补充行
-□ 自检在后台完成，正文无自检清单章节；含公式时已按 **`disclosure_self_check.md` §8.2** 复核**公式正确性与公式逻辑**（有误已在 Step 8 直接改稿）
+
+If `OPENAI_IMAGE_API_KEY` is missing, the script exits with a clear message — ask the user for it, then suggest they add the export to `~/.zshrc`.
+
+## Calling the script
+
+Use the absolute path so it works from any working directory:
+
+```bash
+SKILL_DIR="$HOME/.claude/skills/gpt-image-2"   # adjust if installed elsewhere
+GPT_IMG="python3 $SKILL_DIR/scripts/gpt_image.py"
 ```
+
+### Env vars in Claude Code's Bash subshell
+
+Claude Code's Bash tool runs **non-interactive shells that do NOT auto-source `~/.zshrc`**. If the user has the credentials in their shell rc and you get `ERROR: set OPENAI_IMAGE_API_KEY`, prefix every call with a source:
+
+```bash
+source ~/.zshrc 2>/dev/null && python3 $SKILL_DIR/scripts/gpt_image.py generate -p "..." -o ./out.png
+```
+
+Or, if the user provided the key in-conversation, pass it inline (don't write it to disk yourself):
+
+```bash
+OPENAI_IMAGE_API_KEY="sk-..." OPENAI_IMAGE_BASE_URL="https://jmrai.net/v1" \
+  python3 $SKILL_DIR/scripts/gpt_image.py generate -p "..." -o ./out.png
+```
+
+Test once at the start of a session: `source ~/.zshrc && echo "${OPENAI_IMAGE_API_KEY:0:10}"`. If that prints a key prefix, you can safely use the source-prefix pattern for the rest of the session.
+
+### Generate
+
+```bash
+$GPT_IMG generate \
+  -p "<prompt>" \
+  --size 1536x864 \
+  -o ./hero.png
+```
+
+Defaults: `--quality high` (cost is identical across tiers on this host), `--size 1024x1024`.
+
+### Edit (precise local change)
+
+```bash
+$GPT_IMG edit \
+  -i ./input.png \
+  -p "Edit the input image: change ONLY <X>. Preserve exactly: <Y>. Do not: <Z>." \
+  -o ./edited.png
+```
+
+### Inpaint (mask-based)
+
+White pixels in the mask = region to regenerate; transparent = keep.
+
+```bash
+$GPT_IMG edit -i ./photo.png --mask ./mask.png \
+  -p "Fill the masked area with continuation of the cobblestone street, matching perspective and lighting." \
+  -o ./inpainted.png
+```
+
+### Multiple variants in parallel
+
+`-n N` fires N **parallel** single-image requests. Faster wall-clock than serial, and works regardless of host n>1 support.
+
+```bash
+$GPT_IMG generate -p "..." -n 4 --concurrency 4 -o ./out
+# writes out-1.png … out-4.png
+```
+
+### What the host does NOT support
+
+- **Multi-image input** (composing two source images in one /edits call). For composition, do it in two steps: generate or edit a base, then edit again with the next layer described. The script errors if you pass `-i` more than once.
+- **Transparent backgrounds** (`--background transparent` returns HTTP 400). For sprites / icons / cutouts, use a **chroma-key color in the prompt** (`solid magenta #FF00FF background`) and remove it client-side after with `rembg` or ImageMagick (see `references/post-process.md`).
+- Aspect ratios above 3:1 or sides ≥ 3840px. The script validates upfront.
+
+Run `python3 $SKILL_DIR/scripts/gpt_image.py --help` (or `<subcommand> --help`) for every flag.
+
+## Sizes — pick deliberately
+
+| Use case | Size | Aspect |
+|----------|------|--------|
+| PPT slide / web hero / YouTube thumbnail | `1536x864` (true 16:9) or `1792x1024` | 16:9 / 7:4 |
+| Square: app icon, social, logo, character portrait | `1024x1024` | 1:1 |
+| High-res square / print poster | `2048x2048` | 1:1 |
+| Mobile poster, story, vertical infographic, book cover | `1024x1536` | 2:3 |
+| Tall mobile-first hero | `1024x1792` | 9:16ish |
+| Wide cinematic banner | `1792x1024` | 16:9ish |
+
+Wrong aspect ratio = wasted generation. Decide BEFORE writing the prompt.
+
+## The workflow for any image task
+
+1. **Clarify intent** only if truly ambiguous. Otherwise infer — auto mode means ship.
+2. **Pick the right reference** for the use case (table below).
+3. **Write the prompt** following the structure: *Intent → Scene → Subject → Details → Text → Style → Constraints*. See `references/prompting.md`.
+4. **Pick size** from the table above.
+5. **Call the script.** Save to a sensible path next to the user's project, not `/tmp`.
+6. **VISUALLY VERIFY** — Read the saved PNG yourself. Check: does the text render correctly? Is the composition what you asked for? Did the style land? See § "Visual self-verification" below.
+7. **Iterate** if the verification fails. Change ONE dimension and regenerate.
+8. **Show the user** — Read the final PNG so it appears inline. Tell them the path.
+
+## Visual self-verification (use your vision)
+
+After every generation, before reporting success to the user, **Read the PNG yourself** and verify against the prompt:
+
+- **Text:** Does each quoted string render exactly? No invented characters? Right font weight?
+- **Layout:** Is the negative space where you asked for it? Is the subject on the right side of the frame if you said so?
+- **Composition:** Right camera angle? Right framing? Centered if you said centered?
+- **Style:** Did the named reference land, or did the model default to generic AI-soup?
+- **Negatives obeyed:** No extra hands, no watermarks, no rogue text, no clutter you forbade?
+
+If anything fails, iterate. **Change ONE dimension** (per `references/prompting.md` §6) and regenerate. Don't ship the user a bad result and ask them to verify — your vision is faster than their patience.
+
+If you fired multiple variants (`-n 4`), pick the best one yourself before showing the user. Don't dump four files on them and ask them to choose unless they explicitly want options.
+
+## When to load deeper references
+
+Read these on demand — don't preload them.
+
+| User wants | Read this |
+|------------|-----------|
+| Prompt-writing technique, style vocabulary, intent-first framework, anti-patterns to avoid | `references/prompting.md` |
+| Concrete templates: pitch decks, UI mockups, posters, character sheets, infographics, logos, photoreal, edits | `references/use-cases.md` |
+| Compress, resize, convert, combine, add text post-hoc | `references/post-process.md` |
+| Full parameter list, error codes, custom-resolution constraints | `references/api.md` |
+
+## Core prompt principles (cheat sheet)
+
+The full guide is in `references/prompting.md`; the irreducible minimum:
+
+1. **Open with intent**, not subject. *"Create a pitch-deck slide titled…"* beats *"A chart and some KPIs"*.
+2. **Quote every character** that should appear, exactly once. For Chinese, name the script flavor (`黑体`, `楷书`, `思源黑体`).
+3. **Use spec language, not praise language.** *"50mm f/2.8, soft north-window light from the left"* beats *"beautiful professional lighting"*.
+4. **For edits: change ONLY X / preserve Y exactly.** Always state both.
+5. **One style anchor**, not five. Name an artist, film, movement, or game.
+6. **Drop the magic words.** *4K, 8K, ultra detailed, masterpiece, trending on artstation* — pre-GPT-Image-2 noise. Useless or harmful now.
+7. **Default `--quality high`** (cost is the same on this host). Use lower tiers only for fast throwaway iteration.
+8. **Iterate, don't stack.** One dimension change per regen.
+
+## Self-check before calling the API
+
+- [ ] Does the prompt open with intent (slide / poster / mockup / photograph / illustration)?
+- [ ] Right aspect ratio for the use case?
+- [ ] Did I quote every text string the user wants in the image?
+- [ ] If this is an edit, am I describing the change AND what to preserve?
+- [ ] Is the output path meaningful and discoverable?
+- [ ] Am I about to type any of: `4K, 8K, masterpiece, trending on artstation, ultra detailed`? If yes — delete them.
+
+## Common mistakes
+
+| Mistake | Fix |
+|---------|-----|
+| "Make me an image of a cat" | Open with intent, add style, composition, lighting. See prompting.md. |
+| Generating in `/tmp` | Save next to user's project so they can find it. |
+| Not Reading the result yourself | Visual self-verify EVERY time before showing the user. |
+| Showing all `-n 4` variants without picking | Pick the best one yourself unless user asked for options. |
+| Asking "what style?" when the user said "a poster" | Make a strong first attempt, then iterate. |
+| Curl-ing the API directly | Use the script — handles retries, b64, multipart, parallel. |
+| Forgetting Chinese text in quotes | Quote it exactly or model writes nonsense. |
+| Stacking magic words | "Ultra detailed 8K masterpiece" makes outputs WORSE on GPT Image 2. |
+| Re-describing the whole image in an edit | Describe ONLY the change + what to preserve. |
+| Trying to compose two input images in one /edits call | Not supported on this host — chain two edit calls. |
+
+## Freedom to be creative
+
+These rules guide quality, not creativity. When the user says "surprise me" or leaves room:
+- Pick a distinctive style with conviction (don't default to "modern minimalist")
+- Push compositions: low angles, dutch tilts, asymmetric layouts, generous negative space
+- Fire 3–4 parallel variants when exploring (`-n 4 --concurrency 4`) — same wall-clock as one
+- For art briefs, propose a style direction in one sentence before generating, so the user can redirect cheaply
+
+## Ship-quality bar
+
+A result is ready to show the user when:
+
+- ✅ Read-and-judged by you, not just generated
+- ✅ Text (if any) renders exactly the quoted string
+- ✅ Composition matches the prompt (subject placement, negative space, camera)
+- ✅ Style landed (named reference is recognizable)
+- ✅ No obvious AI failures (warped hands, melted text, ghost limbs)
+- ✅ Saved at a path the user can find
